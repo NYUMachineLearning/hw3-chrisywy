@@ -1,0 +1,151 @@
+---
+title: "HW3"
+author: "Wuyue Yu"
+date: "10/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+#Homework:
+
+Use the Breast Cancer dataset from the mlbench package, and predict whether the cancer is malignant or benign using one of the algorithms we learned about in class. Give some rationale as to why you chose this algorithm. Plot ROC curves, and confusion matrices. If you are choosing a hyperparameter like K or lambda, explain how and why you chose it. 
+
+
+```{r, include=FALSE}
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(ROCR)
+library(pROC)
+library(MASS)
+library(ggfortify)
+library(glmnet)
+library(tidyverse)
+library(caTools)
+library(mlbench)
+library(gridExtra)
+```
+
+1. Get data; divide train set and test set.
+```{r}
+data("BreastCancer")
+BreastCancer <- na.omit(BreastCancer)
+
+set.seed(123)
+BC_split = sample.split(BreastCancer, SplitRatio = 0.75)
+train_data = subset(BreastCancer, BC_split == TRUE)
+test_data = subset(BreastCancer, BC_split == FALSE)
+
+dim(train_data)
+dim(test_data)
+```
+
+2. Look at train data.
+```{r}
+summary(train_data)
+
+sCl.thickness <- ggplot(data = train_data, aes(x = Cl.thickness, fill = Cl.thickness)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sCell.size <- ggplot(data = train_data, aes(x = Cell.size, fill = Cell.size)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sCell.shape <- ggplot(data = train_data, aes(x = Cell.shape, fill = Cell.shape)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sMarg.adhesion <- ggplot(data = train_data, aes(x = Marg.adhesion, fill = Marg.adhesion)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sEpith.c.size <- ggplot(data = train_data, aes(x = Epith.c.size, fill = Epith.c.size)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sBare.nuclei <- ggplot(data = train_data, aes(x = Bare.nuclei, fill = Bare.nuclei)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sBl.cromatin <- ggplot(data = train_data, aes(x = Bl.cromatin, fill = Bl.cromatin)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none")
+sNormal.nucleoli <- ggplot(data = train_data, aes(x = Normal.nucleoli, fill = Normal.nucleoli)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+sMitoses <- ggplot(data = train_data, aes(x = Mitoses, fill = Mitoses)) + 
+  geom_bar(position="identity", alpha=1, stat = "count")  + theme_bw() +
+  theme(legend.position = "none") 
+grid.arrange(sCl.thickness,sCell.size,sCell.shape,sMarg.adhesion,sEpith.c.size,sBare.nuclei,sBl.cromatin,sNormal.nucleoli,sMitoses)
+for(i in 2:10){
+  train_data[,i] <- as.numeric(train_data[,i])
+}
+cor <- cor(train_data[,2:10])
+cor
+heatmap(cor)
+```
+
+3.Train model
+Cell shape feature not used for modeling.
+Attempting non-parametric KNN and parametric logistic regression to compare performances. 
+Both are effective classification methods and training data n = 497 is good.
+
+3.1 KNN model. Bootstrap sampling used.
+```{r}
+set.seed(64)
+ctrl.knn <- trainControl(method = "boot", 15, classProbs = T, savePredictions = T)
+knn_regression <- train(Class ~ Cl.thickness + Cell.size + Marg.adhesion + Epith.c.size + Bare.nuclei + Bl.cromatin + Normal.nucleoli + Mitoses, data = train_data, method = "knn", tuneLength = 20, trControl = ctrl.knn)
+knn_regression
+```
+
+k = 17 chosen for best accuracy
+
+```{r}
+plot(x = roc(predictor = knn_regression$pred$benign,
+             response = knn_regression$pred$obs)$specificities, 
+     y = roc(predictor = knn_regression$pred$benign, 
+             response = knn_regression$pred$obs)$sensitivities,
+     col= "blue", xlim = c(1, 0), type ="l", ylab = "Sensitivity",
+     xlab = "Specificity")
+roc(predictor = knn_regression$pred$benign, response = knn_regression$pred$obs)
+```
+
+```{r}
+for(i in 2:10){
+  test_data[,i] <- as.numeric(test_data[,i])
+}
+knn_predict <- predict(knn_regression, newdata = test_data)
+
+#confusion matrix
+confusionMatrix(knn_predict, 
+                reference = test_data$Class)
+```
+
+3.2 logistic regression. Repeated 10-fold cross-validation.
+```{r}
+set.seed(111)
+ctrl.lr <- trainControl(method = "repeatedcv", repeats = 15, classProbs = T, savePredictions = T)
+logistic_regression <- train(Class ~ Cl.thickness + Cell.size + Marg.adhesion + Epith.c.size + Bare.nuclei + Bl.cromatin + Normal.nucleoli + Mitoses, data = train_data, method = "glm", family= "binomial", maxit = 100 ,trControl = ctrl.lr)
+logistic_regression
+```
+
+
+```{r}
+plot(x = roc(predictor = logistic_regression$pred$benign,
+             response = logistic_regression$pred$obs)$specificities, 
+     y = roc(predictor = logistic_regression$pred$benign, 
+             response = logistic_regression$pred$obs)$sensitivities,
+     col= "blue", xlim = c(1, 0), type ="l", ylab = "Sensitivity",
+     xlab = "Specificity")
+roc(predictor = logistic_regression$pred$benign,response = logistic_regression$pred$obs)
+```
+
+```{r}
+logistic_predict <- predict(logistic_regression, newdata = test_data)
+
+#confusion matrix
+confusionMatrix(logistic_predict, 
+                reference = test_data$Class)
+```
+
+Both models have good predictions in test set; KNN's performance on this test set is slightly better.
